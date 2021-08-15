@@ -1,31 +1,31 @@
 <?php
 
 
-namespace Basilisk\ModelFilter;
+namespace App\Application\Modules\Filter;
 
 
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\Schema;
 
-class ModelFilter
+class Filter
 {
-    private $returnCollection = true;
-
-    public function __construct(bool $returnCollection = true)
+    private string $tableName;
+    public function __construct(private bool $returnCollection = true)
     {
-        $this->returnCollection = $returnCollection;
     }
 
     public function filterResults($modelClass, $filterParams)
     {
         $model = new $modelClass;
+        $this->tableName = $model->getTable();
         $filterConfigs = $model->filtersConfigs;
 
         foreach ($filterParams ?? [] as $property => $value):
             $model = match ($filterConfigs[$property] ?? null) {
                 'exact' => $this->exactMatchingStrategies($model, $property, $value),
-                'partial' => $this->partialMatchingStrategies($model, $property, $value),
-                'start' => $this->startMatchingStrategies($model, $property, $value),
-                'end' => $this->endMatchingStrategies($model, $property, $value),
+                'partial' => $this->partialMatchingStrategies($model, $property, $value, "%%%s%%"),
+                'start' => $this->partialMatchingStrategies($model, $property, $value, "%s%%"),
+                'end' => $this->partialMatchingStrategies($model, $property, $value, "%%%s"),
                 default => $model
             };
         endforeach;
@@ -34,46 +34,69 @@ class ModelFilter
     }
 
 
-    protected function exactMatchingStrategies($model, $property, $value)
+    private function exactMatchingStrategies($model, $property, $value)
     {
-        if (is_array($value))
+        if (!Schema::hasColumn($this->tableName, $property)):
+            $relations = explode(':', $property);
+            $property = array_pop($relations);
+            $relations = implode('.', $relations);
+            return $model->whereHas($relations, function (Builder $query) use ($property, $value) {
+                if (is_array($value))
+                    return $query->whereIn($property, $value);
+                else
+                    return $query->where($property, $value);
+            });
+        elseif (is_array($value)):
             return $model->whereIn($property, $value);
-        return $model->where($property, $value);
+        else:
+            return $model->where($property, $value);
+        endif;
     }
 
 
-    protected function partialMatchingStrategies($model, $property, $value)
+    private function partialMatchingStrategies($model, $property, $value, $pattern)
     {
-        if (is_array($value))
-            return $model->Where(function (Builder $query) use ($value, $property){
-                foreach ($value as $singleValue)
-                    $query->orWhere($property, 'like', '%' . $singleValue . '%');
-            });
+        if (!Schema::hasColumn($this->tableName, $property))
+            return $this->filterRelations($property, $model, $value, $pattern);
 
-        return $model->Where($property, 'like', '%' . $value . '%');
+        if (is_array($value))
+            return $this->filterBasedOnArrayParams($model, $value, $property, $pattern);
+
+        return $model->Where($property, 'like', sprintf($pattern,$value));
     }
 
-
-    protected function startMatchingStrategies($model, $property, $value)
+    /**
+     * @param $model
+     * @param array $value
+     * @param $property
+     * @param $pattern
+     * @return mixed
+     */
+    private function filterBasedOnArrayParams($model, array $value, $property, $pattern): mixed
     {
-        if (is_array($value))
-            return $model->Where(function (Builder $query) use ($value, $property){
-                foreach ($value as $singleValue)
-                    $query->orWhere($property, 'like', $singleValue . '%');
-            });
-
-        return $model->Where($property, 'like', $value . '%');
+        return $model->Where(function (Builder $query) use ($value, $property, $pattern) {
+            foreach ($value as $singleValue)
+                $query->orWhere($property, 'like', sprintf($pattern, $singleValue));
+        });
     }
 
-
-    protected function endMatchingStrategies($model, $property, $value)
+    /**
+     * @param $property
+     * @param $model
+     * @param $value
+     * @param $pattern
+     * @return mixed
+     */
+    private function filterRelations($property, $model, $value, $pattern): mixed
     {
-        if (is_array($value))
-            return $model->Where(function (Builder $query) use ($value, $property){
-                foreach ($value as $singleValue)
-                    $query->orWhere($property, 'like', '%' . $singleValue);
-            });
-
-        return $model->Where($property, 'like', '%' . $value);
+        $relations = explode(':', $property);
+        $property = array_pop($relations);
+        $relations = implode('.', $relations);
+        return $model->whereHas($relations, function (Builder $query) use ($property, $value, $pattern) {
+            if (is_array($value))
+                return $this->filterBasedOnArrayParams($query, $value, $property, $pattern);
+            else
+                return $query->Where($property, 'like', sprintf($pattern, $value));
+        });
     }
 }

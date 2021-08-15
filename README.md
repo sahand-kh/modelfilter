@@ -1,0 +1,3 @@
+# Laravel Model Filter
+## Introduction
+ModelFilter is a Laravel package for filtering Eloquent models. it is very easy to use and can be configured to match your needs. Lets say you want to enable api to filter results by multiple parameters, ModelFilter can dynamically filter results and return a collection or maybe you want to also do some process or add other conditions after filter is implemented, no problem, ModelFilter can return the model instead of the collection
