@@ -10,6 +10,9 @@ use Illuminate\Support\Facades\Schema;
 class Filter
 {
     private string $tableName;
+    private const PARTIAL_MATCH_PATTERN = "%%%s%%";
+    private const START_MATCH_PATTERN = "%s%%";
+    private const END_MATCH_PATTERN = "%%%s";
 
     public function filterResults($modelClass, $filterParams, $returnCollection = true)
     {
@@ -19,11 +22,11 @@ class Filter
 
         foreach ($filterParams ?? [] as $property => $value):
             $model = match ($filterConfigs[$property] ?? null) {
-                'exact' => $this->exactMatchingStrategies($model, $property, $value),
-                'partial' => $this->partialMatchingStrategies($model, $property, $value, "%%%s%%"),
-                'start' => $this->partialMatchingStrategies($model, $property, $value, "%s%%"),
-                'end' => $this->partialMatchingStrategies($model, $property, $value, "%%%s"),
-                'exist' => $this->existMatchingStrategies($model, $property, $value),
+                'exact' => $this->exactMatchingStrategy($model, $property, $value),
+                'partial' => $this->partialMatchingStrategy($model, $property, $value, self::PARTIAL_MATCH_PATTERN),
+                'start' => $this->partialMatchingStrategy($model, $property, $value, self::START_MATCH_PATTERN),
+                'end' => $this->partialMatchingStrategy($model, $property, $value, self::END_MATCH_PATTERN),
+                'exist' => $this->existMatchingStrategy($model, $property, $value),
                 default => $model
             };
         endforeach;
@@ -32,7 +35,7 @@ class Filter
     }
 
 
-    private function exactMatchingStrategies($model, $property, $value)
+    private function exactMatchingStrategy($model, $property, $value)
     {
         if (!Schema::hasColumn($this->tableName, $property)):
             $relations = explode(':', $property);
@@ -47,7 +50,7 @@ class Filter
     }
 
 
-    private function partialMatchingStrategies($model, $property, $value, $pattern)
+    private function partialMatchingStrategy($model, $property, $value, $pattern)
     {
         if (!Schema::hasColumn($this->tableName, $property))
             return $this->filterRelations($model, $property, $value, $pattern);
@@ -59,7 +62,7 @@ class Filter
     }
 
 
-    private function existMatchingStrategies($model, $property, $value)
+    private function existMatchingStrategy($model, $property, $value)
     {
         if (is_null($value))
             return $model->has(str_replace(':', ".", $property));
