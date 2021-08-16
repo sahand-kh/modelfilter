@@ -10,11 +10,8 @@ use Illuminate\Support\Facades\Schema;
 class Filter
 {
     private string $tableName;
-    public function __construct(private bool $returnCollection = true)
-    {
-    }
 
-    public function filterResults($modelClass, $filterParams)
+    public function filterResults($modelClass, $filterParams, $returnCollection = true)
     {
         $model = new $modelClass;
         $this->tableName = $model->getTable();
@@ -26,11 +23,12 @@ class Filter
                 'partial' => $this->partialMatchingStrategies($model, $property, $value, "%%%s%%"),
                 'start' => $this->partialMatchingStrategies($model, $property, $value, "%s%%"),
                 'end' => $this->partialMatchingStrategies($model, $property, $value, "%%%s"),
+                'exist' => $this->existMatchingStrategies($model, $property, $value),
                 default => $model
             };
         endforeach;
 
-        return $this->returnCollection ? $model->get() : $model;
+        return $returnCollection ? $model->get() : $model;
     }
 
 
@@ -41,15 +39,10 @@ class Filter
             $property = array_pop($relations);
             $relations = implode('.', $relations);
             return $model->whereHas($relations, function (Builder $query) use ($property, $value) {
-                if (is_array($value))
-                    return $query->whereIn($property, $value);
-                else
-                    return $query->where($property, $value);
+                return $this->filterOnExactMatch($value, $query, $property);
             });
-        elseif (is_array($value)):
-            return $model->whereIn($property, $value);
         else:
-            return $model->where($property, $value);
+            return $this->filterOnExactMatch($value, $model, $property);
         endif;
     }
 
@@ -57,13 +50,21 @@ class Filter
     private function partialMatchingStrategies($model, $property, $value, $pattern)
     {
         if (!Schema::hasColumn($this->tableName, $property))
-            return $this->filterRelations($property, $model, $value, $pattern);
+            return $this->filterRelations($model, $property, $value, $pattern);
 
         if (is_array($value))
-            return $this->filterBasedOnArrayParams($model, $value, $property, $pattern);
+            return $this->filterBasedOnArrayParams($model, $property, $value, $pattern);
 
         return $model->Where($property, 'like', sprintf($pattern,$value));
     }
+
+
+    private function existMatchingStrategies($model, $property, $value)
+    {
+        if (is_null($value))
+            return $model->has(str_replace(':', ".", $property));
+    }
+
 
     /**
      * @param $model
@@ -72,7 +73,7 @@ class Filter
      * @param $pattern
      * @return mixed
      */
-    private function filterBasedOnArrayParams($model, array $value, $property, $pattern): mixed
+    private function filterBasedOnArrayParams($model, $property, array $value, $pattern): mixed
     {
         return $model->Where(function (Builder $query) use ($value, $property, $pattern) {
             foreach ($value as $singleValue)
@@ -81,22 +82,36 @@ class Filter
     }
 
     /**
-     * @param $property
      * @param $model
+     * @param $property
      * @param $value
      * @param $pattern
      * @return mixed
      */
-    private function filterRelations($property, $model, $value, $pattern): mixed
+    private function filterRelations($model, $property, $value, $pattern): mixed
     {
         $relations = explode(':', $property);
         $property = array_pop($relations);
         $relations = implode('.', $relations);
         return $model->whereHas($relations, function (Builder $query) use ($property, $value, $pattern) {
             if (is_array($value))
-                return $this->filterBasedOnArrayParams($query, $value, $property, $pattern);
+                return $this->filterBasedOnArrayParams($query, $property, $value, $pattern);
             else
                 return $query->Where($property, 'like', sprintf($pattern, $value));
         });
+    }
+
+    /**
+     * @param $value
+     * @param $query
+     * @param string|null $property
+     * @return mixed
+     */
+    private function filterOnExactMatch($value, $model, ?string $property): mixed
+    {
+        if (is_array($value))
+            return $model->whereIn($property, $value);
+        else
+            return $model->where($property, $value);
     }
 }
